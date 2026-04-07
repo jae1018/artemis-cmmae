@@ -1,0 +1,16 @@
+{
+  "config_id": 5,
+  "timestamp": "2025-11-26T17:57:39.682254",
+  "latent_dim": 6,
+  "projection_dim": 256,
+  "lr": 0.001028794588454798,
+  "lambda_contrast": 0.8603163273629584,
+  "temperature": 0.01582019792075107,
+  "som_x": 16,
+  "som_y": 20,
+  "som_size": 320,
+  "n_hpo_trials": 300,
+  "train_acc": 0.9942690528855821,
+  "val_acc": 0.9886921589049249,
+  "test_acc": 0.9890360895386021
+}

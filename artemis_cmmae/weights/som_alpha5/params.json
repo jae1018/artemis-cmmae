@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "init_params": {
+    "sigmaN": 0.01,
+    "topology": "rectangular",
+    "compact_support": false,
+    "random_seed": 0,
+    "n_parallel": 0,
+    "x": 9,
+    "y": 11,
+    "learning_rate": 0.29010412076795294,
+    "learning_rateN": 0.04990017682488101,
+    "sigma": 17,
+    "decay_function": "exponential",
+    "neighborhood_function": "mexican_hat",
+    "input_len": 6
+  },
+  "train_params": {
+    "num_epochs": 94
+  }
+}

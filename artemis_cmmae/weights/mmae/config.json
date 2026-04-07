@@ -1,0 +1,9 @@
+{
+  "config_id": 5,
+  "latent_dim": 6,
+  "lr": 0.001028794588454798,
+  "weight_decay": 0.00014236261547499689,
+  "lambda_contrast": 0.8603163273629584,
+  "temperature": 0.01582019792075107,
+  "projection_dim": 256
+}
