@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "artemis-cmmae"
 version = "0.1.0"
-description = "ARTEMIS plasma region classifier using Multi-Modal Autoencoders and Self-Organizing Maps"
+description = "ARTEMIS plasma region classifier using Contrastive Multi-Modal Autoencoder and Self-Organizing Maps"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -28,6 +28,10 @@ dependencies = [
     "joblib>=1.3",
     "scikit-learn>=1.5,<2",
     "xpysom>=1.0.7",
+    "pyspedas>=1.7",
+    "cdflib>=1.0",
+    "xarray>=2023.1",
+    "matplotlib>=3.5",
 ]
 
 [project.urls]

@@ -5,3 +5,16 @@ build/
 dist/
 *.egg
 .eggs/
+
+# Downloaded THEMIS/ARTEMIS data cache from notebook
+artemis_cmmae_data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor / IDE
+.vscode/
+
+# OS cruft
+.DS_Store
+Thumbs.db
