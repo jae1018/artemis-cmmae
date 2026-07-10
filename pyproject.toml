@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "numpy>=1.24",
+    "numpy>=2.0",
     "pandas>=2.0",
     "torch>=2.0",
     "joblib>=1.3",
