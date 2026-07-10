@@ -7,6 +7,14 @@ spacecraft observations. Uses a Contrastive Multi-Modal Autoencoder
 four plasma regions (solar wind, magnetosheath, lobe, plasma sheet) on
 held-out ARTEMIS observations.
 
+[![Example ARTEMIS plasma-region classification](docs/example_classification.png)](docs/example_classification.png)
+
+*A 12-day ARTEMIS (THEMIS-B) pass classified end-to-end: ion energy spectrogram,
+GSE magnetic field, ion density + temperature, per-sample (`raw`) and 1-hour
+persistence region strips, and the GSE X-Y trajectory with Shue magnetopause and
+Chao bow-shock curves. Produced by
+[`notebooks/classification_showcase.ipynb`](notebooks/classification_showcase.ipynb).* (You can click on the image to enlarge it).
+
 ## Classified Regions
 
 | ID | Region |
