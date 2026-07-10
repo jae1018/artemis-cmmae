@@ -13,7 +13,6 @@ Usage:
 """
 
 import json
-import pickle
 import importlib.resources
 import joblib
 from pathlib import Path
@@ -31,6 +30,48 @@ PACKAGE_DIR = Path(importlib.resources.files("artemis_cmmae"))
 
 
 # ============================================================================
+# Latent-space preprocessing (pure numpy -- no scikit-learn dependency)
+# ============================================================================
+# The SOM front-end applies a fitted MinMaxScaler then a PCA rotation to the
+# MMAE latent embeddings. Both are simple affine/linear maps fully described by
+# a few arrays, so we store those arrays as JSON (weights/som_alpha*/
+# preprocessors.json) and apply them with numpy. This keeps the transforms
+# exactly reproducible across environments and removes scikit-learn -- whose
+# pickled estimators otherwise raise InconsistentVersionWarning on any version
+# mismatch -- as a runtime dependency. Byte-identical to the original sklearn
+# path across all alphas (validated against the shipped predictions).
+
+class _MinMaxScaler:
+    """MinMaxScaler.transform as pure numpy: ``X * scale_ + min_``."""
+
+    def __init__(self, scale, min_):
+        self.scale_ = np.asarray(scale, dtype=np.float64)
+        self.min_ = np.asarray(min_, dtype=np.float64)
+
+    def transform(self, X):
+        return np.asarray(X, dtype=np.float64) * self.scale_ + self.min_
+
+
+class _PCA:
+    """PCA.transform as pure numpy: ``(X - mean_) @ components_.T`` (+ optional whiten)."""
+
+    def __init__(self, components, mean, whiten=False, explained_variance=None):
+        self.components_ = np.asarray(components, dtype=np.float64)
+        self.mean_ = np.asarray(mean, dtype=np.float64)
+        self.whiten = bool(whiten)
+        self.explained_variance_ = (
+            np.asarray(explained_variance, dtype=np.float64)
+            if explained_variance is not None else None
+        )
+
+    def transform(self, X):
+        Xt = (np.asarray(X, dtype=np.float64) - self.mean_) @ self.components_.T
+        if self.whiten:
+            Xt = Xt / np.sqrt(self.explained_variance_)
+        return Xt
+
+
+# ============================================================================
 # Main Classifier Class
 # ============================================================================
 
@@ -45,7 +86,7 @@ class PlasmaClassifier:
     Attributes:
         device: torch device (cuda or cpu)
         model: MMAE model
-        preprocessors: dict with 'scaler' and 'pca' for latent space preprocessing
+        scaler, pca: numpy-backed MinMaxScaler + PCA transforms (latent-space preprocessing)
         som: trained SOM model
         node_labels: array of class labels for each SOM node
         label_map: dict mapping label IDs to human-readable names
@@ -162,14 +203,25 @@ class PlasmaClassifier:
         self.model.eval()
 
     def _load_preprocessors(self):
-        """Load preprocessing pipeline (scaler + PCA) for current alpha"""
-        preprocessors_path = self.som_weights_dir / "preprocessors.pkl"
+        """Load the latent-space MinMaxScaler + PCA transform parameters.
 
-        with open(preprocessors_path, 'rb') as f:
-            self.preprocessors = pickle.load(f)
+        Parameters live in ``preprocessors.json`` (plain arrays) and are applied
+        with numpy via :class:`_MinMaxScaler` / :class:`_PCA` -- no scikit-learn
+        needed. Byte-identical to the original sklearn estimators (validated
+        across all alphas).
+        """
+        params_path = self.som_weights_dir / "preprocessors.json"
+        with open(params_path) as f:
+            params = json.load(f)
 
-        self.scaler = self.preprocessors['scaler']
-        self.pca = self.preprocessors['pca']
+        sc = params["scaler"]
+        pc = params["pca"]
+        self.scaler = _MinMaxScaler(sc["scale"], sc["min"])
+        self.pca = _PCA(
+            pc["components"], pc["mean"],
+            whiten=pc.get("whiten", False),
+            explained_variance=pc.get("explained_variance"),
+        )
 
     def _load_som(self):
         """Load SOM model for current alpha"""
