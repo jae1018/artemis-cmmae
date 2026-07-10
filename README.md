@@ -3,7 +3,7 @@
 A pre-trained classifier for identifying plasma regions from ARTEMIS
 spacecraft observations. Uses a Contrastive Multi-Modal Autoencoder
 (C-MMAE) with supervised contrastive learning and Self-Organizing Map
-(SOM) clustering. The default model achieves ~98.9% test accuracy across
+(SOM) clustering. The default model achieves ~99% test accuracy across
 four plasma regions (solar wind, magnetosheath, lobe, plasma sheet) on
 held-out ARTEMIS observations.
 
@@ -16,6 +16,9 @@ held-out ARTEMIS observations.
 | 1 | Magnetosheath |
 | 2 | Lobe |
 | 3 | Plasma Sheet |
+
+`-1` ("Unknown") is a genuine model output -- a sample that maps to an
+unlabeled SOM node -- not an error.
 
 ## Installation
 
@@ -33,82 +36,152 @@ pip install .
 
 ### Dependencies
 
-numpy, pandas, torch, joblib, scikit-learn, xpysom
+Installed automatically with the package: numpy, pandas, torch, joblib,
+scikit-learn, xpysom, pyspedas, cdflib, xarray, matplotlib.
 
 ## Quick Start
 
+A single `PlasmaClassifier` exposes three ways to predict, from most convenient
+to lowest-level. Construct it once (it loads the model), then call whichever
+entry point matches your data:
+
 ```python
-from artemis_cmmae import PlasmaClassifier, load_sample_data
+from artemis_cmmae import PlasmaClassifier
 
-# Load bundled sample data (1 month of ARTEMIS observations)
-df = load_sample_data()
+clf = PlasmaClassifier()   # loads the C-MMAE + SOM weights once
 
-# Initialize classifier
-clf = PlasmaClassifier(alpha=1)
-
-# Get predictions
-predictions, label_map = clf.predict(df)
+# 1) Easiest -- give a probe and a time range; it downloads, prepares, and
+#    classifies in one call.
+labels = clf.predict_from_pyspedas("thb", ["2020-09-01", "2020-09-02"])
+print(labels[["region_name", "in_wake"]].head())
 ```
 
-To classify your own data, pass any DataFrame with the required columns
-(see [Input Data Format](#input-data-format) below).
+Already have data loaded, or your own prepared features?
+
+```python
+# 2) From loaded ESA + FGM datasets (xarray Datasets or dicts of arrays):
+labels = clf.predict_from_ds(esa_ds, fgm_ds=fgm_ds)
+
+# 3) From a fully-prepared feature table (see Input Data Format).  The bundled
+#    sample is exactly such a frame:
+from artemis_cmmae import load_sample_data
+predictions, label_map = clf.predict(load_sample_data())
+```
 
 ## API Reference
 
-### `PlasmaClassifier(alpha=1, weights_dir=None, device=None)`
+### `PlasmaClassifier(alpha=1)`
 
 **Parameters:**
 - `alpha` (int): Map size penalty controlling SOM granularity. One of `1`, `5`, or `10`.
   - `alpha=1`: 16x20 = 320 nodes (finest resolution, highest accuracy, default)
   - `alpha=5`: 9x11 = 99 nodes (medium)
   - `alpha=10`: 7x9 = 63 nodes (most compact)
-- `weights_dir` (Path, optional): Custom path to weights directory.
-- `device` (str, optional): `"cuda"`, `"cpu"`, or `None` for auto-detect.
+
+The classifier provides three prediction entry points:
+
+### `clf.predict_from_pyspedas(probe, trange, **kwargs)`
+
+Download THEMIS/ARTEMIS ESA + FGM for a probe (`"thb"` or `"thc"`) over a
+`[start, end]` time range via pyspedas, prepare the features, and classify --
+all in one call. Returns a time-indexed
+`DataFrame` (see [Prediction output](#prediction-output)). Useful options:
+`no_update` (default `False`; set `True` for local-only, no download),
+`drop_wake`, and `files` / `fgm_files` (read given local CDFs instead of
+downloading). The download location is controlled by pyspedas's
+`SPEDAS_DATA_DIR` environment variable (set it before first use).
+
+### `clf.predict_from_ds(ds, fgm_ds=None, **kwargs)`
+
+Classify already-loaded data. `ds` is a PEIF ESA dataset -- an xarray `Dataset`
+or a dict of numpy arrays keyed by the native CDF variable names (e.g.
+`thb_peif_en_eflux`, `thb_peif_en_eflux_yaxis`, `thb_peif_density`,
+`thb_peif_sc_pot`, `thb_peif_time`) -- and `fgm_ds` supplies the GSE field
+(`thb_fgs_gse`). Returns the same time-indexed `DataFrame`. This is the manual
+form of `predict_from_pyspedas`.
 
 ### `clf.predict(df, batch_size=2048)`
 
-Returns `(predictions, label_map)` where `predictions` is an integer array of
-label IDs and `label_map` is a dict mapping IDs to region names.
+Classify a fully-prepared feature table (see
+[Input Data Format](#input-data-format)). Returns `(predictions, label_map)`
+where `predictions` is an integer array of region ids and `label_map` maps ids
+to names.
 
-### `clf.predict_bmu(df, mode="1d", batch_size=2048)`
+### Prediction output
 
-Returns Best Matching Unit (BMU) indices on the SOM grid.
-- `mode="1d"`: flattened node index (int array)
-- `mode="2d"`: list of `(i, j)` tuples
+`predict_from_pyspedas` and `predict_from_ds` return a `DataFrame` indexed by a
+`DatetimeIndex` named `time`, with columns:
 
-### `clf.predict_with_embeddings(df, batch_size=2048)`
+| Column | Meaning |
+|--------|---------|
+| `region_id` | Region id in `{-1, 0, 1, 2, 3}` (see [Classified Regions](#classified-regions)). |
+| `region_name` | Human-readable region name. |
+| `in_wake` | `True` if the sample is in the lunar wake (`SCPot <= 1 V` plus adjacent time steps). Wake samples are still classified; the flag lets you exclude them. |
+| `X_GSE`, `Y_GSE`, `Z_GSE`, `X_GSM`, `Y_GSM`, `Z_GSM` | Spacecraft position in GSE and GSM (R_E). Always present from `predict_from_pyspedas` (it always loads the L1 state product); from `predict_from_ds` when a `state_ds` is supplied. |
 
-Returns a dict with all intermediate results:
-- `predictions`: label ID array
-- `bmu_1d`, `bmu_2d`: BMU indices
-- `embeddings_raw`: 6-D C-MMAE latent vectors
-- `embeddings_pca`: PCA-transformed embeddings (SOM input)
-- `label_map`: label ID to name mapping
+Rows with non-finite scalars (`n`, `SCPot`, `BX_GSE` / `BY_GSE` / `BZ_GSE`) or
+`n <= 0` cannot be classified and are dropped up front (with a one-line count
+when `verbose=True`). Pass `return_features=True` to also return the feature
+columns used -- `C0`..`C30`, `n`, `SCPot`, the GSE field
+`BX_GSE` / `BY_GSE` / `BZ_GSE`, and the GSM field `BX_GSM` / `BY_GSM` / `BZ_GSM`.
+
+**Only the GSE magnetic field ever enters the model** -- the C-MMAE was trained
+on GSE B. The GSM field and all position columns are output-only context and
+never reach the model.
+
+### `build_features_from_ds(ds, fgm_ds=None, **kwargs)`
+
+Top-level function that builds and returns the model-ready feature table
+(`C0`..`C30`, `n`, `SCPot`, `BX_GSE` / `BY_GSE` / `BZ_GSE`, `in_wake`) from a dataset
+**without** running the classifier -- handy for inspecting or QC-ing the
+prepared features. `predict_from_ds` is this plus `predict`.
+
+### Other methods
+
+- `clf.predict_bmu(df, mode="1d")` -- Best Matching Unit indices on the SOM grid
+  (`"1d"` flattened index, or `"2d"` `(i, j)` tuples).
+- `clf.predict_with_embeddings(df)` -- dict with `predictions`, `bmu_1d`,
+  `bmu_2d`, `embeddings_raw` (6-D latent), `embeddings_pca`, and `label_map`.
+
+Lower-level building blocks live in the submodules: `artemis_cmmae.loaders`
+(`load_esa`, `load_fgm`), `artemis_cmmae.features` (`prepare_ion_spectra`,
+`flag_lunar_wake`, `REF_ENERGY_GRID_ASC`), and `artemis_cmmae.pipeline`.
 
 ## Input Data Format
+
+If you use `predict_from_pyspedas` or `predict_from_ds`, the package builds these
+features for you from the raw ESA/FGM data -- you can skip this section. It
+matters only for the low-level `clf.predict(df)` path, where you supply the
+prepared table directly.
 
 Your DataFrame must contain the following columns, all in physical
 (linear-scale) units:
 
 | Column(s) | Description | Units |
 |-----------|-------------|-------|
-| `C0` - `C30` | Ion energy flux (31 log-spaced energy bins, ~5 eV to ~25 keV) | eV/(cm^2 s sr eV) |
-| `n` | Ion number density | cm^-3 |
+| `C0` - `C30` | Ion energy flux, 31 channels in **ascending** energy order (C0 = lowest), interpolated onto the model's fixed log-spaced grid (~5 eV to ~25 keV) | eV/(cm^2 s sr eV) |
+| `n` | Ion number density (must be > 0) | cm^-3 |
 | `SCPot` | Spacecraft potential | V |
-| `BX`, `BY`, `BZ` | Magnetic field components in GSE | nT |
+| `BX_GSE`, `BY_GSE`, `BZ_GSE` | Magnetic field components in GSE | nT |
 
-The classifier internally applies `log10(eflux + 1)` to energy channels
-and `log10(n)` to density, then standardizes all features using fixed
-training-set statistics. No pre-transforms are needed.
+**Energy order and interpolation matter.** The model was trained on spectra
+re-gridded onto a fixed 31-bin grid in **ascending** energy order. Raw THEMIS
+PEIF spectra arrive in **descending** order and differ by instrument sweep mode,
+so they must be interpolated onto that grid first. The high-level entry points
+(and `build_features_from_ds`) do this correctly; if you build the table
+yourself, replicate it with `artemis_cmmae.features.prepare_ion_spectra` and
+`REF_ENERGY_GRID_ASC`.
 
-The index should be a `DatetimeIndex` named `time`, though the classifier
-itself does not use timestamps.
+The classifier internally applies `log10(eflux + 1)` to the energy channels and
+`log10(n)` to density, then standardizes with fixed training-set statistics --
+pass LINEAR units, no pre-transforms. The index should be a `DatetimeIndex`
+named `time`.
 
 ## Sample Data
 
-A one-month sample dataset (September 2020) is bundled with the package.
-Load it with `load_sample_data()` or find it at
-`artemis_cmmae/sample_data/sample.csv`. See `examples/quickstart.py` for usage.
+A one-month sample dataset (September 2020) is bundled with the package. Load it
+with `load_sample_data()` or find it at `artemis_cmmae/sample_data/sample.csv`.
+See [`quickstart.py`](quickstart.py) for usage.
 
 ## Paper and Data
 
@@ -120,7 +193,12 @@ Journal of Geophysical Research: Machine Learning and Computation:
 > Magnetotail using ARTEMIS Observations*.
 
 The full training data, HPO results, and reproducibility archive are
-available on Zenodo: [DOI placeholder]
+available on Zenodo: [10.5281/zenodo.19447300](https://zenodo.org/records/19447300)
+
+## Distribution Statement
+
+Approved for public release; distribution is unlimited. Public Affairs release
+approval #AFRL20261291.
 
 ## License
 
